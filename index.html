@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>anti-anti-HTML</title>
+<style>
+  :root { --bg:#f6f5f1; --ink:#1c1f1d; --mute:#6a706c; --line:#cfd2cc; --accent:#1f6f5c; --panel:#ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161917; --ink:#e8ebe6; --mute:#98a09a; --line:#333a35; --accent:#5fc4a8; --panel:#1e2220; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 8vh 20px 40px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  p.sub { margin: 0 0 24px; color: var(--mute); }
+  #drop { display:block; border: 2px dashed var(--line); border-radius: 10px; padding: 56px 20px; text-align: center; cursor: pointer; background: var(--panel); transition: border-color .15s, background .15s; }
+  #drop:hover, #drop:focus-within, #drop.over { border-color: var(--accent); }
+  #drop strong { display:block; font-size: 1.15rem; }
+  #drop span { color: var(--mute); }
+  #file { position:absolute; opacity:0; width:1px; height:1px; }
+  details { margin-top: 20px; }
+  summary { cursor: pointer; color: var(--mute); }
+  textarea { width:100%; min-height: 140px; margin-top: 10px; padding: 10px; font: 13px/1.4 ui-monospace, Consolas, monospace; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  @media (prefers-color-scheme: dark) { button.primary { color: #0d1512; } }
+  button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .opt { margin-top: 20px; color: var(--mute); font-size: .92rem; display:flex; gap:8px; align-items:flex-start; }
+  .opt input { margin-top: 4px; }
+  #err { color: #b3372b; margin-top: 12px; min-height: 1.4em; }
+  .row { margin: 12px 0 0; text-align: center; }
+  #pick button { display: block; margin-top: 6px; }
+
+  #runner { position: fixed; inset: 0; display: none; flex-direction: column; background: var(--bg); }
+  #runner.on { display: flex; }
+  #bar { display:flex; gap:8px; align-items:center; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  #bar .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mute); }
+  #frame { flex: 1; width: 100%; border: 0; background: #fff; }
+</style>
+</head>
+<body>
+<main id="home">
+  <h1>anti-anti-HTML</h1>
+  <p class="sub">Open an HTML file right in the browser. Nothing is uploaded; the file is read and run on this device.</p>
+
+  <label id="drop" for="file">
+    <strong>Drop an HTML file or a whole folder</strong>
+    <span>Folders run with their CSS, scripts and images</span>
+    <input id="file" type="file" accept=".html,.htm,text/html" multiple>
+  </label>
+  <p class="row"><button id="pickFolder" type="button">Choose a folder</button>
+  <input id="folder" type="file" webkitdirectory multiple hidden></p>
+  <div id="pick"></div>
+
+  <label class="opt">
+    <input id="storage" type="checkbox">
+    <span>Let single files save data (localStorage, cookies). Only for files you trust: it shares this site's storage. Folders always run this way.</span>
+  </label>
+
+  <details>
+    <summary>Paste HTML instead</summary>
+    <textarea id="paste" spellcheck="false" placeholder="<h1>Hello</h1>"></textarea>
+    <p><button id="runPaste" class="primary" type="button">Run pasted HTML</button></p>
+  </details>
+
+  <div id="err" role="alert"></div>
+</main>
+
+<section id="runner" aria-label="Running page">
+  <div id="bar">
+    <button id="back" type="button">Close</button>
+    <span class="name" id="name"></span>
+    <button id="tab" type="button">Open in new tab</button>
+    <button id="full" type="button">Fullscreen</button>
+  </div>
+  <iframe id="frame" title="Uploaded page"
+    allow="fullscreen; autoplay; gamepad; clipboard-write; microphone; camera"></iframe>
+</section>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var frame = $('frame'), runner = $('runner'), err = $('err');
+  var currentHtml = '', blobUrl = null, siteUrl = null;
+  var SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-pointer-lock allow-downloads allow-orientation-lock allow-presentation';
+
+  function run(html, label) {
+    err.textContent = '';
+    currentHtml = html;
+    var sb = SANDBOX + ($('storage').checked ? ' allow-same-origin' : '');
+    frame.setAttribute('sandbox', sb);
+    frame.srcdoc = html;
+    $('name').textContent = label || 'pasted HTML';
+    runner.classList.add('on');
+    document.title = (label || 'pasted HTML') + ' - anti-anti-HTML';
+  }
+
+  function close() {
+    runner.classList.remove('on');
+    frame.srcdoc = '';
+    frame.removeAttribute('src');
+    currentHtml = ''; siteUrl = null;
+    document.title = 'anti-anti-HTML';
+    $('file').value = ''; $('folder').value = '';
+  }
+
+  var MIME = { html:'text/html', htm:'text/html', css:'text/css', js:'text/javascript', mjs:'text/javascript', json:'application/json', svg:'image/svg+xml', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', ico:'image/x-icon', wasm:'application/wasm', mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', mp4:'video/mp4', webm:'video/webm', woff:'font/woff', woff2:'font/woff2', ttf:'font/ttf', txt:'text/plain', xml:'application/xml' };
+  var base = new URL('.', location.href);
+  function isHtml(p) { return /\.html?$/i.test(p); }
+  function flat(parts) { return [].concat.apply([], parts); }
+
+  // Cache key for a file inside a dropped folder; sw.js serves these URLs.
+  function siteKey(path) {
+    var safe = path.replace(/%/g, '%25').replace(/#/g, '%23').replace(/\?/g, '%3F');
+    return new URL('__site__/' + safe, base).href;
+  }
+
+  function readSingle(file) {
+    if (!isHtml(file.name) && file.type !== 'text/html') {
+      err.textContent = 'That is not an HTML file. Choose a .html or .htm file.';
+      return;
+    }
+    var r = new FileReader();
+    r.onload = function () { run(String(r.result), file.name); };
+    r.onerror = function () { err.textContent = 'Could not read that file. Try choosing it again.'; };
+    r.readAsText(file);
+  }
+
+  // Recursively read a dropped file or folder entry into [{path, file}].
+  function walk(entry, prefix) {
+    if (entry.isFile) return new Promise(function (res) {
+      entry.file(function (f) { res([{ path: prefix + entry.name, file: f }]); }, function () { res([]); });
+    });
+    return new Promise(function (res) {
+      var reader = entry.createReader(), all = [];
+      (function next() {
+        reader.readEntries(function (batch) {
+          if (!batch.length) {
+            return Promise.all(all.map(function (e) { return walk(e, prefix + entry.name + '/'); }))
+              .then(function (parts) { res(flat(parts)); });
+          }
+          all = all.concat(Array.prototype.slice.call(batch));
+          next();
+        }, function () { res([]); });
+      })();
+    });
+  }
+
+  function handle(items) {
+    err.textContent = ''; $('pick').textContent = '';
+    items = items.filter(function (i) { return !/(^|\/)(\.git|\.DS_Store)(\/|$)/.test(i.path); });
+    if (!items.length) return;
+    // Drop the shared top-level folder name (src/index.html becomes index.html)
+    var first = items[0].path.split('/')[0];
+    if (items[0].path.indexOf('/') > -1 && items.every(function (i) { return i.path.split('/')[0] === first; })) {
+      items.forEach(function (i) { i.path = i.path.slice(first.length + 1); });
+    }
+    if (items.length === 1) return readSingle(items[0].file);
+    var pages = items.filter(function (i) { return isHtml(i.path); });
+    if (!pages.length) { err.textContent = 'No HTML file found. Include an index.html.'; return; }
+    var entry = pages.filter(function (i) { return i.path.toLowerCase() === 'index.html'; })[0];
+    if (entry || pages.length === 1) return runSite(items, (entry || pages[0]).path);
+    err.textContent = 'Which page should open first?';
+    pages.forEach(function (p) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = p.path;
+      b.onclick = function () { runSite(items, p.path); };
+      $('pick').appendChild(b);
+    });
+  }
+
+  function runSite(items, entry) {
+    if (!('serviceWorker' in navigator) || !window.caches) {
+      err.textContent = 'Folder mode needs service workers. Open this site over https in a current browser.';
+      return;
+    }
+    err.textContent = 'Loading ' + items.length + ' files...';
+    navigator.serviceWorker.register('sw.js')
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function () { return caches.delete('aah-site'); })
+      .then(function () { return caches.open('aah-site'); })
+      .then(function (cache) {
+        return Promise.all(items.map(function (i) {
+          var ext = i.path.split('.').pop().toLowerCase();
+          var type = MIME[ext] || i.file.type || 'application/octet-stream';
+          return cache.put(siteKey(i.path), new Response(i.file, { headers: { 'Content-Type': type } }));
+        }));
+      })
+      .then(function () {
+        err.textContent = '';
+        siteUrl = siteKey(entry);
+        currentHtml = '';
+        frame.removeAttribute('srcdoc');
+        frame.setAttribute('sandbox', SANDBOX + ' allow-same-origin');
+        frame.src = siteUrl;
+        $('name').textContent = entry;
+        runner.classList.add('on');
+      })
+      .catch(function (e) { err.textContent = 'Could not start folder mode: ' + e.message; });
+  }
+
+  function fromInput(e) {
+    handle(Array.prototype.map.call(e.target.files, function (f) { return { path: f.webkitRelativePath || f.name, file: f }; }));
+  }
+  $('file').addEventListener('change', fromInput);
+  $('folder').addEventListener('change', fromInput);
+  $('pickFolder').addEventListener('click', function () { $('folder').click(); });
+
+  var drop = $('drop');
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('over'); });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('over'); });
+  });
+  drop.addEventListener('drop', function (e) {
+    var dt = e.dataTransfer, jobs = [];
+    // Entries must be grabbed synchronously, before the event ends
+    Array.prototype.forEach.call(dt.items || [], function (it) {
+      var en = it.webkitGetAsEntry && it.webkitGetAsEntry();
+      if (en) jobs.push(walk(en, ''));
+    });
+    if (!jobs.length) {
+      handle(Array.prototype.map.call(dt.files, function (f) { return { path: f.name, file: f }; }));
+      return;
+    }
+    Promise.all(jobs).then(function (parts) { handle(flat(parts)); });
+  });
+  // Dropping anywhere on the page should not navigate away from it
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('drop', function (e) { e.preventDefault(); });
+
+  $('runPaste').addEventListener('click', function () {
+    var v = $('paste').value.trim();
+    if (!v) { err.textContent = 'Paste some HTML first.'; return; }
+    run(v, 'pasted HTML');
+  });
+
+  $('back').addEventListener('click', close);
+  $('full').addEventListener('click', function () {
+    if (frame.requestFullscreen) frame.requestFullscreen();
+  });
+  $('tab').addEventListener('click', function () {
+    if (siteUrl) { window.open(siteUrl, '_blank'); return; }
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    blobUrl = URL.createObjectURL(new Blob([currentHtml], { type: 'text/html' }));
+    window.open(blobUrl, '_blank');
+  });
+})();
+</script>
+</body>
+</html>
