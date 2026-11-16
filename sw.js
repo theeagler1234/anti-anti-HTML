@@ -12,7 +12,22 @@ self.addEventListener('fetch', function (e) {
     var cache = await caches.open('aah-site');
     var res = await cache.match(u.href);
     if (!res && u.pathname.slice(-1) === '/') res = await cache.match(u.href + 'index.html');
-    return res || new Response('Not found: ' + u.pathname.slice(root.pathname.length),
-      { status: 404, headers: { 'Content-Type': 'text/plain' } });
+    if (!res) {
+      return new Response('Not found: ' + u.pathname.slice(root.pathname.length),
+        { status: 404, headers: { 'Content-Type': 'text/plain' } });
+    }
+
+    var ct = res.headers.get('Content-Type') || '';
+    if (ct.toLowerCase().includes('text/html') && ct.toLowerCase().includes('charset')) {
+      var headers = new Headers(res.headers);
+      headers.set('Content-Type', 'text/html');
+      return new Response(await res.arrayBuffer(), {
+        status: res.status,
+        statusText: res.statusText,
+        headers: headers
+      });
+    }
+
+    return res;
   })());
 });
