@@ -83,15 +83,29 @@
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var frame = $('frame'), runner = $('runner'), err = $('err');
-  var currentHtml = '', blobUrl = null, siteUrl = null;
+  var blobUrl = null, siteUrl = null;
   var SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-pointer-lock allow-downloads allow-orientation-lock allow-presentation';
 
-  function run(html, label) {
+  // Encode pasted text as UTF-16LE with BOM so the browser never reads it as UTF-8
+  function toUtf16Blob(str) {
+    var buf = new ArrayBuffer((str.length + 1) * 2);
+    var view = new Uint16Array(buf);
+    view[0] = 0xFEFF;
+    for (var i = 0; i < str.length; i++) view[i + 1] = str.charCodeAt(i);
+    return new Blob([buf], { type: 'text/html' });
+  }
+
+  function runBlob(blob, label) {
     err.textContent = '';
-    currentHtml = html;
+    siteUrl = null;
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    // Re-wrap with exact 'text/html' (no charset parameter) preserving raw bytes
+    var cleanBlob = new Blob([blob], { type: 'text/html' });
+    blobUrl = URL.createObjectURL(cleanBlob);
     var sb = SANDBOX + ($('storage').checked ? ' allow-same-origin' : '');
+    frame.removeAttribute('srcdoc');
     frame.setAttribute('sandbox', sb);
-    frame.srcdoc = html;
+    frame.src = blobUrl;
     $('name').textContent = label || 'pasted HTML';
     runner.classList.add('on');
     document.title = (label || 'pasted HTML') + ' - anti-anti-HTML';
@@ -99,9 +113,10 @@
 
   function close() {
     runner.classList.remove('on');
-    frame.srcdoc = '';
+    frame.removeAttribute('srcdoc');
     frame.removeAttribute('src');
-    currentHtml = ''; siteUrl = null;
+    if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+    siteUrl = null;
     document.title = 'anti-anti-HTML';
     $('file').value = ''; $('folder').value = '';
   }
@@ -122,10 +137,10 @@
       err.textContent = 'That is not an HTML file. Choose a .html or .htm file.';
       return;
     }
-    var r = new FileReader();
-    r.onload = function () { run(String(r.result), file.name); };
-    r.onerror = function () { err.textContent = 'Could not read that file. Try choosing it again.'; };
-    r.readAsText(file);
+    if ($('storage').checked) {
+      return runSite([{ path: file.name, file: file }], file.name);
+    }
+    runBlob(file, file.name);
   }
 
   // Recursively read a dropped file or folder entry into [{path, file}].
@@ -191,12 +206,13 @@
       .then(function () {
         err.textContent = '';
         siteUrl = siteKey(entry);
-        currentHtml = '';
+        if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
         frame.removeAttribute('srcdoc');
         frame.setAttribute('sandbox', SANDBOX + ' allow-same-origin');
         frame.src = siteUrl;
         $('name').textContent = entry;
         runner.classList.add('on');
+        document.title = entry + ' - anti-anti-HTML';
       })
       .catch(function (e) { err.textContent = 'Could not start folder mode: ' + e.message; });
   }
@@ -204,6 +220,7 @@
   function fromInput(e) {
     handle(Array.prototype.map.call(e.target.files, function (f) { return { path: f.webkitRelativePath || f.name, file: f }; }));
   }
+
   $('file').addEventListener('change', fromInput);
   $('folder').addEventListener('change', fromInput);
   $('pickFolder').addEventListener('click', function () { $('folder').click(); });
@@ -228,6 +245,7 @@
     }
     Promise.all(jobs).then(function (parts) { handle(flat(parts)); });
   });
+
   // Dropping anywhere on the page should not navigate away from it
   window.addEventListener('dragover', function (e) { e.preventDefault(); });
   window.addEventListener('drop', function (e) { e.preventDefault(); });
@@ -235,7 +253,7 @@
   $('runPaste').addEventListener('click', function () {
     var v = $('paste').value.trim();
     if (!v) { err.textContent = 'Paste some HTML first.'; return; }
-    run(v, 'pasted HTML');
+    runBlob(toUtf16Blob(v), 'pasted HTML');
   });
 
   $('back').addEventListener('click', close);
@@ -244,9 +262,7 @@
   });
   $('tab').addEventListener('click', function () {
     if (siteUrl) { window.open(siteUrl, '_blank'); return; }
-    if (blobUrl) URL.revokeObjectURL(blobUrl);
-    blobUrl = URL.createObjectURL(new Blob([currentHtml], { type: 'text/html' }));
-    window.open(blobUrl, '_blank');
+    if (blobUrl) { window.open(blobUrl, '_blank'); }
   });
 })();
 </script>
